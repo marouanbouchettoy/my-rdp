@@ -29,16 +29,37 @@ jobs:
         
     - name: Démarrer tunnel RDP
       run: |
-        Start-Process -FilePath "./ngrok.exe" -ArgumentList "tcp 3389" -NoNewWindow
-        Start-Sleep -Seconds 10
+        Start-Process -FilePath "./ngrok.exe" -ArgumentList "tcp 3389" -WindowStyle Hidden
+        Write-Host "Démarrage de ngrok..."
+        Start-Sleep -Seconds 15
         
     - name: Obtenir URL ngrok
       run: |
-        $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels"
-        $rdpUrl = $response.tunnels[0].public_url
-        Write-Host "URL RDP: $rdpUrl"
-        Write-Host "Utilisateur: rdpuser"
-        Write-Host "Mot de passe: RDP123!"
+        $maxAttempts = 10
+        $attempt = 0
+        $rdpUrl = $null
+        
+        while ($attempt -lt $maxAttempts -and $rdpUrl -eq $null) {
+          try {
+            $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -TimeoutSec 5
+            if ($response.tunnels.Count -gt 0) {
+              $rdpUrl = $response.tunnels[0].public_url
+              Write-Host "✅ URL RDP: $rdpUrl"
+              Write-Host "👤 Utilisateur: rdpuser"
+              Write-Host "🔑 Mot de passe: RDP123!"
+              break
+            }
+          } catch {
+            Write-Host "Tentative $($attempt + 1)/$maxAttempts - En attente de ngrok..."
+            Start-Sleep -Seconds 5
+          }
+          $attempt++
+        }
+        
+        if ($rdpUrl -eq $null) {
+          Write-Host "❌ Impossible d'obtenir l'URL ngrok"
+          exit 1
+        }
         
     - name: Maintenir la connexion
       run: |
