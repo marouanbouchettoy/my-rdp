@@ -1,241 +1,52 @@
-name: Windows RDP via ngrok
+name: RDP Access via ngrok
 
 on:
   workflow_dispatch:
     inputs:
-      keep_alive:
-        description: 'Keep session alive until timeout'
-        required: false
-        default: 'true'
-        type: boolean
-  # Trigger temporaire pour faire apparaître le workflow - à supprimer après
-  push:
-    branches: [ main ]
-    paths: [ '.github/workflows/rdp-setup.yml' ]
+      duration:
+        description: 'Duration in minutes (max 360)'
+        required: true
+        default: '60'
+        type: string
 
 jobs:
-  build:
+  rdp-setup:
     runs-on: windows-latest
-    timeout-minutes: 9999
-
+    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Download ngrok
-      run: |
-        Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
-        Expand-Archive -Path "ngrok.zip" -DestinationPath "." -Force
-        Remove-Item "ngrok.zip"
-
-    - name: Setup ngrok auth
-      run: |
-        .\ngrok.exe config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
-
     - name: Enable RDP
       run: |
-        Write-Host "Configuring Remote Desktop..."
-        
-        # Activer le Remote Desktop
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
-        
-        # Activer RDP à travers le firewall
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        
-        # Configurer l'authentification au niveau du réseau
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
         
-        # Redémarrer le service Terminal Services
-        Write-Host "Restarting Terminal Services..."
-        Restart-Service -Name "TermService" -Force
-        
-        # Attendre que le service soit complètement démarré
-        Start-Sleep -Seconds 5
-        
-        # Vérifier le statut du service
-        $serviceStatus = Get-Service -Name "TermService"
-        Write-Host "Terminal Service Status: $($serviceStatus.Status)"
-        
-        # Vérifier que le port 3389 est ouvert
-        Write-Host "Checking RDP port 3389..."
-        $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
-        if ($rdpPort) {
-          Write-Host "✅ RDP port 3389 is listening"
-        } else {
-          Write-Host "⚠️ RDP port 3389 not found, waiting..."
-          Start-Sleep -Seconds 10
-          $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
-          if ($rdpPort) {
-            Write-Host "✅ RDP port 3389 is now listening"
-          } else {
-            Write-Host "❌ RDP port 3389 still not available"
-          }
-        }
-
-    - name: Create RDP user
+    - name: Create RDP User
       run: |
-        Write-Host "Creating RDP user..."
-        
-        # Créer un utilisateur pour RDP
-        net user rdpuser "${{ secrets.RDP_PASSWORD }}" /add
+        net user rdpuser "P@ssw0rd123!" /add
         net localgroup administrators rdpuser /add
-        net localgroup "Remote Desktop Users" rdpuser /add
         
-        # Vérifier que l'utilisateur a été créé
-        $user = Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue
-        if ($user) {
-          Write-Host "✅ User 'rdpuser' created successfully"
-          Write-Host "User Status: $($user.Enabled)"
-        } else {
-          Write-Host "❌ Failed to create user 'rdpuser'"
-        }
-        
-        # Autoriser l'utilisateur à se connecter via RDP
-        Write-Host "Configuring RDP permissions..."
-        
-        # Attendre un moment pour que tout soit configuré
-        Start-Sleep -Seconds 3
-
-    - name: Test RDP connection locally
+    - name: Setup ngrok
       run: |
-        Write-Host "Testing RDP service locally..."
+        Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
+        Expand-Archive -Path "ngrok.zip" -DestinationPath "C:\ngrok"
+        C:\ngrok\ngrok.exe authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
         
-        # Tester la connexion RDP locale
-        try {
-          $rdpTest = Test-NetConnection -ComputerName "localhost" -Port 3389 -InformationLevel Quiet
-          if ($rdpTest) {
-            Write-Host "✅ RDP service is responding on port 3389"
-          } else {
-            Write-Host "❌ RDP service is not responding"
-          }
-        } catch {
-          Write-Host "⚠️ Could not test RDP connection: $($_.Exception.Message)"
-        }
-        
-        # Afficher les connexions actives sur le port 3389
-        Write-Host "Active connections on port 3389:"
-        Get-NetTCPConnection -LocalPort 3389 | Select-Object LocalAddress, LocalPort, State
-
-    - name: Start ngrok tunnel and get endpoint
+    - name: Start ngrok tunnel
       run: |
-        Write-Host "Starting ngrok tunnel..."
+        Start-Process -FilePath "C:\ngrok\ngrok.exe" -ArgumentList "tcp 3389" -WindowStyle Hidden
+        Start-Sleep -Seconds 10
         
-        # Démarrer ngrok en arrière-plan
-        $ngrokProcess = Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log stdout" -NoNewWindow -PassThru
+    - name: Get ngrok URL
+      run: |
+        $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels"
+        $rdpUrl = $response.tunnels[0].public_url
+        Write-Host "RDP URL: $rdpUrl"
+        Write-Host "Username: rdpuser"
+        Write-Host "Password: P@ssw0rd123!"
         
-        # Attendre que ngrok démarre et récupérer l'endpoint
-        $maxAttempts = 30
-        $attempt = 0
-        $endpoint = $null
-        
-        do {
-          $attempt++
-          Write-Host "Attempt $attempt/$maxAttempts - Checking ngrok status..."
-          Start-Sleep -Seconds 2
-          
-          try {
-            $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -TimeoutSec 5
-            $tunnel = $response.tunnels | Where-Object { $_.proto -eq "tcp" } | Select-Object -First 1
-            
-            if ($tunnel -and $tunnel.public_url) {
-              $endpoint = $tunnel.public_url.Replace('tcp://', '')
-              Write-Host "✅ Tunnel established successfully!"
-              break
-            }
-          } catch {
-            Write-Host "⏳ Waiting for ngrok to initialize..."
-          }
-        } while ($attempt -lt $maxAttempts)
-        
-        if ($endpoint) {
-          Write-Host ""
-          Write-Host "================================="
-          Write-Host "🚀 RDP CONNECTION READY!"
-          Write-Host "================================="
-          Write-Host "Host: $endpoint"
-          Write-Host "Username: rdpuser"
-          Write-Host "Password: [Check repository secrets]"
-          Write-Host "================================="
-          Write-Host ""
-          
-          # Sauvegarder les informations
-          $connectionInfo = "=== RDP CONNECTION INFO ===`nHost: $endpoint`nUsername: rdpuser`nPassword: [PROTECTED - Check repository secrets]`n============================"
-          $connectionInfo | Out-File -FilePath "rdp_connection_info.txt"
-          
-          # Exporter l'endpoint pour l'étape suivante
-          Write-Host "Setting environment variable for next step..."
-          Add-Content -Path $env:GITHUB_ENV -Value "NGROK_ENDPOINT=$endpoint"
-          
-        } else {
-          Write-Host "❌ Failed to establish ngrok tunnel after $maxAttempts attempts"
-          exit 1
-        }
-
     - name: Keep session alive
       run: |
-        Write-Host "🔄 Starting session monitoring..."
-        Write-Host "Endpoint: $env:NGROK_ENDPOINT"
-        Write-Host "Session will remain active until GitHub Actions timeout"
-        Write-Host ""
-        
-        $startTime = Get-Date
-        $counter = 0
-        
-        # Boucle infinie optimisée
-        while ($true) {
-          $currentTime = Get-Date
-          $elapsed = $currentTime - $startTime
-          $counter++
-          
-          # Affichage simplifié toutes les 5 minutes
-          if ($counter % 5 -eq 1) {
-            Write-Host "[$($currentTime.ToString('HH:mm:ss'))] 🟢 Session active - Elapsed: $($elapsed.ToString('hh\:mm\:ss'))"
-            Write-Host "📡 RDP Endpoint: $env:NGROK_ENDPOINT"
-          }
-          
-          # Vérification rapide du tunnel toutes les 10 minutes
-          if ($counter % 10 -eq 0) {
-            try {
-              $quickCheck = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -TimeoutSec 3 -ErrorAction Stop
-              $activeTunnel = $quickCheck.tunnels | Where-Object { $_.proto -eq "tcp" } | Select-Object -First 1
-              
-              if ($activeTunnel) {
-                Write-Host "✅ Tunnel verified OK"
-              } else {
-                Write-Host "⚠️ Tunnel check failed - but continuing..."
-              }
-            } catch {
-              Write-Host "⚠️ Quick tunnel check failed - but continuing..."
-            }
-          }
-          
-          # Attendre 1 minute
-          Start-Sleep -Seconds 60
-        }
-      continue-on-error: true
-
-    - name: Upload connection info
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: rdp-connection-info
-        path: rdp_connection_info.txt
-        retention-days: 1
-
-    - name: Final session info
-      if: always()
-      run: |
-        Write-Host ""
-        Write-Host "================================="
-        Write-Host "🔗 SESSION INFORMATION"
-        Write-Host "================================="
-        Write-Host "RDP Endpoint: $env:NGROK_ENDPOINT"
-        Write-Host "Username: rdpuser"
-        Write-Host "Password: Check repository secrets (RDP_PASSWORD)"
-        Write-Host "================================="
-        Write-Host ""
-        Write-Host "ℹ️  Session will remain active until:"
-        Write-Host "   - GitHub Actions timeout (6 hours max)"
-        Write-Host "   - Manual cancellation"
-        Write-Host ""
-        Write-Host "📥 Connection info also saved as artifact"
+        $duration = [int]"${{ github.event.inputs.duration }}"
+        if ($duration -gt 360) { $duration = 360 }
+        Write-Host "Session will run for $duration minutes"
+        Start-Sleep -Seconds ($duration * 60)
