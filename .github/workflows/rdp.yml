@@ -65,9 +65,10 @@ jobs:
         $endpoint = $rdpUrl -replace "tcp://", ""
         $endpoint | Out-File -FilePath "ngrok_endpoint.txt" -Encoding UTF8
         Write-Host "📁 Endpoint sauvegardé dans ngrok_endpoint.txt: $endpoint"
+        Write-Host "🔗 ENDPOINT DIRECT: $endpoint"
         
     - name: Uploader l'endpoint
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ngrok-endpoint
         path: ngrok_endpoint.txt
