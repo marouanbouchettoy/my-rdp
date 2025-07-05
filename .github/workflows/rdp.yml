@@ -12,11 +12,14 @@ jobs:
         run: .\ngrok\ngrok.exe authtoken $Env:NGROK_TOKEN
         env:
           NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
+      - name: Create User
+        run: |
+          New-LocalUser -Name "marouan" -Password (ConvertTo-SecureString -AsPlainText "marouan" -Force) -FullName "Marouan" -Description "RDP User"
+          Add-LocalGroupMember -Group "Administrators" -Member "marouan"
       - name: Enable Remote Desktop
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-          Set-LocalUser -Name "marouan" -Password (ConvertTo-SecureString -AsPlainText "marouan" -Force)
       - name: Create ngrok Tunnel
         run: .\ngrok\ngrok.exe tcp 3389
