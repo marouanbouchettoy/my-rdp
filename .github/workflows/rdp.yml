@@ -61,6 +61,17 @@ jobs:
           exit 1
         }
         
+        # Sauvegarder l'endpoint dans un fichier
+        $endpoint = $rdpUrl -replace "tcp://", ""
+        $endpoint | Out-File -FilePath "ngrok_endpoint.txt" -Encoding UTF8
+        Write-Host "📁 Endpoint sauvegardé dans ngrok_endpoint.txt: $endpoint"
+        
+    - name: Uploader l'endpoint
+      uses: actions/upload-artifact@v3
+      with:
+        name: ngrok-endpoint
+        path: ngrok_endpoint.txt
+        
     - name: Maintenir la connexion
       run: |
         while ($true) {
