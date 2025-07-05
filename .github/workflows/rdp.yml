@@ -8,6 +8,10 @@ on:
         required: false
         default: '360'
         type: string
+  # Trigger temporaire pour faire apparaître le workflow - à supprimer après
+  push:
+    branches: [ main ]
+    paths: [ '.github/workflows/rdp-setup.yml' ]
 
 jobs:
   build:
