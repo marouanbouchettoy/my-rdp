@@ -12,10 +12,9 @@ jobs:
         run: .\ngrok\ngrok.exe authtoken $Env:NGROK_TOKEN
         env:
           NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
-      - name: Create User
+      - name: Update Existing User
         run: |
-          New-LocalUser -Name "marouan" -Password (ConvertTo-SecureString -AsPlainText "Marouan123!" -Force) -FullName "Marouan" -Description "RDP User"
-          Add-LocalGroupMember -Group "Administrators" -Member "marouan"
+          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "Marouan123!" -Force)
       - name: Enable Remote Desktop
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
