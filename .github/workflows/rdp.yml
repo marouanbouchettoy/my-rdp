@@ -34,28 +34,87 @@ jobs:
 
     - name: Enable RDP
       run: |
+        Write-Host "Configuring Remote Desktop..."
+        
         # Activer le Remote Desktop
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
         
         # Activer RDP à travers le firewall
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
         
-        # Configurer l'authentification au niveau du réseau (optionnel)
+        # Configurer l'authentification au niveau du réseau
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+        
+        # Redémarrer le service Terminal Services
+        Write-Host "Restarting Terminal Services..."
+        Restart-Service -Name "TermService" -Force
+        
+        # Attendre que le service soit complètement démarré
+        Start-Sleep -Seconds 5
+        
+        # Vérifier le statut du service
+        $serviceStatus = Get-Service -Name "TermService"
+        Write-Host "Terminal Service Status: $($serviceStatus.Status)"
+        
+        # Vérifier que le port 3389 est ouvert
+        Write-Host "Checking RDP port 3389..."
+        $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
+        if ($rdpPort) {
+          Write-Host "✅ RDP port 3389 is listening"
+        } else {
+          Write-Host "⚠️ RDP port 3389 not found, waiting..."
+          Start-Sleep -Seconds 10
+          $rdpPort = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
+          if ($rdpPort) {
+            Write-Host "✅ RDP port 3389 is now listening"
+          } else {
+            Write-Host "❌ RDP port 3389 still not available"
+          }
+        }
 
     - name: Create RDP user
       run: |
+        Write-Host "Creating RDP user..."
+        
         # Créer un utilisateur pour RDP
         net user rdpuser "${{ secrets.RDP_PASSWORD }}" /add
         net localgroup administrators rdpuser /add
         net localgroup "Remote Desktop Users" rdpuser /add
+        
+        # Vérifier que l'utilisateur a été créé
+        $user = Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue
+        if ($user) {
+          Write-Host "✅ User 'rdpuser' created successfully"
+          Write-Host "User Status: $($user.Enabled)"
+        } else {
+          Write-Host "❌ Failed to create user 'rdpuser'"
+        }
+        
+        # Autoriser l'utilisateur à se connecter via RDP
+        Write-Host "Configuring RDP permissions..."
+        
+        # Attendre un moment pour que tout soit configuré
+        Start-Sleep -Seconds 3
 
-    - name: Get system info
+    - name: Test RDP connection locally
       run: |
-        Write-Host "=== System Information ==="
-        Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, TotalPhysicalMemory
-        Write-Host "=== Network Configuration ==="
-        Get-NetAdapter | Where-Object Status -eq "Up" | Select-Object Name, InterfaceDescription, LinkSpeed
+        Write-Host "Testing RDP service locally..."
+        
+        # Tester la connexion RDP locale
+        try {
+          $rdpTest = Test-NetConnection -ComputerName "localhost" -Port 3389 -InformationLevel Quiet
+          if ($rdpTest) {
+            Write-Host "✅ RDP service is responding on port 3389"
+          } else {
+            Write-Host "❌ RDP service is not responding"
+          }
+        } catch {
+          Write-Host "⚠️ Could not test RDP connection: $($_.Exception.Message)"
+        }
+        
+        # Afficher les connexions actives sur le port 3389
+        Write-Host "Active connections on port 3389:"
+        Get-NetTCPConnection -LocalPort 3389 | Select-Object LocalAddress, LocalPort, State
 
     - name: Start ngrok tunnel and get endpoint
       run: |
