@@ -14,7 +14,7 @@ jobs:
           NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
       - name: Create User
         run: |
-          New-LocalUser -Name "marouan" -Password (ConvertTo-SecureString -AsPlainText "marouan" -Force) -FullName "Marouan" -Description "RDP User"
+          New-LocalUser -Name "marouan" -Password (ConvertTo-SecureString -AsPlainText "Marouan123!" -Force) -FullName "Marouan" -Description "RDP User"
           Add-LocalGroupMember -Group "Administrators" -Member "marouan"
       - name: Enable Remote Desktop
         run: |
