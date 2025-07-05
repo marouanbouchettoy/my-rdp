@@ -153,6 +153,7 @@ jobs:
           # Attendre 1 minute
           Start-Sleep -Seconds 60
         }
+      continue-on-error: true
 
     - name: Upload connection info
       uses: actions/upload-artifact@v4
@@ -161,3 +162,21 @@ jobs:
         name: rdp-connection-info
         path: rdp_connection_info.txt
         retention-days: 1
+
+    - name: Final session info
+      if: always()
+      run: |
+        Write-Host ""
+        Write-Host "================================="
+        Write-Host "🔗 SESSION INFORMATION"
+        Write-Host "================================="
+        Write-Host "RDP Endpoint: $env:NGROK_ENDPOINT"
+        Write-Host "Username: rdpuser"
+        Write-Host "Password: Check repository secrets (RDP_PASSWORD)"
+        Write-Host "================================="
+        Write-Host ""
+        Write-Host "ℹ️  Session will remain active until:"
+        Write-Host "   - GitHub Actions timeout (6 hours max)"
+        Write-Host "   - Manual cancellation"
+        Write-Host ""
+        Write-Host "📥 Connection info also saved as artifact"
