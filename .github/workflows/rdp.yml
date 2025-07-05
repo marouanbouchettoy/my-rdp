@@ -8,6 +8,19 @@ jobs:
     runs-on: windows-latest
     
     steps:
+    - name: Vérifier type de disque
+      run: |
+        Get-PhysicalDisk | Select-Object FriendlyName, MediaType, Size
+        Write-Host "Configuration du stockage détectée"
+        
+    - name: Optimiser SSD
+      run: |
+        # Désactiver la défragmentation (inutile sur SSD)
+        schtasks /Change /TN "Microsoft\Windows\Defrag\ScheduledDefrag" /Disable
+        # Optimiser les performances SSD
+        fsutil behavior set DisableLastAccess 1
+        Write-Host "Optimisation SSD appliquée"
+        
     - name: Activer RDP
       run: |
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
