@@ -3,11 +3,11 @@ name: Windows RDP via ngrok
 on:
   workflow_dispatch:
     inputs:
-      duration:
-        description: 'Duration in minutes'
+      keep_alive:
+        description: 'Keep session alive until timeout'
         required: false
-        default: '360'
-        type: string
+        default: 'true'
+        type: boolean
   # Trigger temporaire pour faire apparaître le workflow - à supprimer après
   push:
     branches: [ main ]
@@ -87,31 +87,62 @@ jobs:
 
     - name: Keep alive
       run: |
-        $duration = [int]"${{ github.event.inputs.duration }}"
-        Write-Host "Keeping session alive for $duration minutes..."
+        Write-Host "Session will remain active until GitHub Actions timeout (6 hours max)"
         Write-Host "RDP session is ready. Use the connection info above to connect."
+        Write-Host "=== MONITORING SESSION ==="
         
-        # Boucle pour maintenir la session active
-        $endTime = (Get-Date).AddMinutes($duration)
-        while ((Get-Date) -lt $endTime) {
-          $remainingTime = $endTime - (Get-Date)
-          Write-Host "Time remaining: $($remainingTime.ToString('hh\:mm\:ss'))"
+        $startTime = Get-Date
+        $counter = 0
+        
+        # Boucle infinie jusqu'à timeout GitHub Actions
+        while ($true) {
+          $currentTime = Get-Date
+          $elapsed = $currentTime - $startTime
+          $counter++
           
-          # Vérifier si ngrok est toujours actif
-          try {
-            $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -TimeoutSec 5
-            $tunnel = $response.tunnels | Where-Object { $_.proto -eq "tcp" } | Select-Object -First 1
-            if ($tunnel) {
-              Write-Host "Tunnel active: $($tunnel.public_url)"
+          Write-Host "[$($currentTime.ToString('HH:mm:ss'))] Session active - Elapsed: $($elapsed.ToString('hh\:mm\:ss'))"
+          
+          # Vérifier le tunnel toutes les 5 minutes (tous les 5 cycles)
+          if ($counter % 5 -eq 0) {
+            try {
+              $tunnelResponse = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -TimeoutSec 10 -ErrorAction Stop
+              $activeTunnel = $tunnelResponse.tunnels | Where-Object { $_.proto -eq "tcp" -and $_.public_url -like "*ngrok*" }
+              
+              if ($activeTunnel) {
+                Write-Host "✅ Tunnel OK: $($activeTunnel.public_url) -> localhost:3389"
+              } else {
+                Write-Host "⚠️  No active TCP tunnel found, attempting restart..."
+                # Relancer ngrok si nécessaire
+                Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log stdout" -NoNewWindow
+                Start-Sleep -Seconds 15
+              }
+            } catch {
+              Write-Host "⚠️  Tunnel check failed: $($_.Exception.Message)"
+              # Tentative de relance de ngrok
+              try {
+                Write-Host "Attempting to restart ngrok..."
+                Stop-Process -Name "ngrok" -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 5
+                Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log stdout" -NoNewWindow
+                Start-Sleep -Seconds 15
+              } catch {
+                Write-Host "Failed to restart ngrok: $($_.Exception.Message)"
+              }
             }
-          } catch {
-            Write-Host "Warning: Unable to check tunnel status"
           }
           
+          # Garder la session Windows active
+          try {
+            # Simuler une activité pour éviter que la session se mette en veille
+            [System.Windows.Forms.SendKeys]::SendWait(" ")
+          } catch {
+            # Si SendKeys n'est pas disponible, utiliser une autre méthode
+            Get-Process | Out-Null
+          }
+          
+          # Attendre 1 minute avant la prochaine vérification
           Start-Sleep -Seconds 60
         }
-        
-        Write-Host "Session expired. Terminating..."
 
     - name: Upload connection info
       uses: actions/upload-artifact@v4
