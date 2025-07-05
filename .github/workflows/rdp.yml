@@ -57,90 +57,100 @@ jobs:
         Write-Host "=== Network Configuration ==="
         Get-NetAdapter | Where-Object Status -eq "Up" | Select-Object Name, InterfaceDescription, LinkSpeed
 
-    - name: Start ngrok tunnel
+    - name: Start ngrok tunnel and get endpoint
       run: |
         Write-Host "Starting ngrok tunnel..."
-        Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log stdout" -NoNewWindow
-        Start-Sleep -Seconds 10
-
-    - name: Get ngrok tunnel info
-      run: |
-        try {
-          $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels"
-          $tunnel = $response.tunnels | Where-Object { $_.proto -eq "tcp" } | Select-Object -First 1
-          if ($tunnel) {
-            Write-Host "=== RDP CONNECTION INFO ==="
-            Write-Host "Host: $($tunnel.public_url.Replace('tcp://', ''))"
-            Write-Host "Username: rdpuser"
-            Write-Host "Password: [PROTECTED - Check repository secrets]"
-            Write-Host "=========================="
+        
+        # Démarrer ngrok en arrière-plan
+        $ngrokProcess = Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log stdout" -NoNewWindow -PassThru
+        
+        # Attendre que ngrok démarre et récupérer l'endpoint
+        $maxAttempts = 30
+        $attempt = 0
+        $endpoint = $null
+        
+        do {
+          $attempt++
+          Write-Host "Attempt $attempt/$maxAttempts - Checking ngrok status..."
+          Start-Sleep -Seconds 2
+          
+          try {
+            $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -TimeoutSec 5
+            $tunnel = $response.tunnels | Where-Object { $_.proto -eq "tcp" } | Select-Object -First 1
             
-            # Sauvegarder les informations dans un fichier
-            $connectionInfo = "=== RDP CONNECTION INFO ===`nHost: $($tunnel.public_url.Replace('tcp://', ''))`nUsername: rdpuser`nPassword: [PROTECTED - Check repository secrets]`n============================"
-            $connectionInfo | Out-File -FilePath "rdp_connection_info.txt"
-          } else {
-            Write-Host "No TCP tunnel found"
+            if ($tunnel -and $tunnel.public_url) {
+              $endpoint = $tunnel.public_url.Replace('tcp://', '')
+              Write-Host "✅ Tunnel established successfully!"
+              break
+            }
+          } catch {
+            Write-Host "⏳ Waiting for ngrok to initialize..."
           }
-        } catch {
-          Write-Host "Error getting tunnel info: $($_.Exception.Message)"
+        } while ($attempt -lt $maxAttempts)
+        
+        if ($endpoint) {
+          Write-Host ""
+          Write-Host "================================="
+          Write-Host "🚀 RDP CONNECTION READY!"
+          Write-Host "================================="
+          Write-Host "Host: $endpoint"
+          Write-Host "Username: rdpuser"
+          Write-Host "Password: [Check repository secrets]"
+          Write-Host "================================="
+          Write-Host ""
+          
+          # Sauvegarder les informations
+          $connectionInfo = "=== RDP CONNECTION INFO ===`nHost: $endpoint`nUsername: rdpuser`nPassword: [PROTECTED - Check repository secrets]`n============================"
+          $connectionInfo | Out-File -FilePath "rdp_connection_info.txt"
+          
+          # Exporter l'endpoint pour l'étape suivante
+          Write-Host "Setting environment variable for next step..."
+          Add-Content -Path $env:GITHUB_ENV -Value "NGROK_ENDPOINT=$endpoint"
+          
+        } else {
+          Write-Host "❌ Failed to establish ngrok tunnel after $maxAttempts attempts"
+          exit 1
         }
 
-    - name: Keep alive
+    - name: Keep session alive
       run: |
-        Write-Host "Session will remain active until GitHub Actions timeout (6 hours max)"
-        Write-Host "RDP session is ready. Use the connection info above to connect."
-        Write-Host "=== MONITORING SESSION ==="
+        Write-Host "🔄 Starting session monitoring..."
+        Write-Host "Endpoint: $env:NGROK_ENDPOINT"
+        Write-Host "Session will remain active until GitHub Actions timeout"
+        Write-Host ""
         
         $startTime = Get-Date
         $counter = 0
         
-        # Boucle infinie jusqu'à timeout GitHub Actions
+        # Boucle infinie optimisée
         while ($true) {
           $currentTime = Get-Date
           $elapsed = $currentTime - $startTime
           $counter++
           
-          Write-Host "[$($currentTime.ToString('HH:mm:ss'))] Session active - Elapsed: $($elapsed.ToString('hh\:mm\:ss'))"
+          # Affichage simplifié toutes les 5 minutes
+          if ($counter % 5 -eq 1) {
+            Write-Host "[$($currentTime.ToString('HH:mm:ss'))] 🟢 Session active - Elapsed: $($elapsed.ToString('hh\:mm\:ss'))"
+            Write-Host "📡 RDP Endpoint: $env:NGROK_ENDPOINT"
+          }
           
-          # Vérifier le tunnel toutes les 5 minutes (tous les 5 cycles)
-          if ($counter % 5 -eq 0) {
+          # Vérification rapide du tunnel toutes les 10 minutes
+          if ($counter % 10 -eq 0) {
             try {
-              $tunnelResponse = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -TimeoutSec 10 -ErrorAction Stop
-              $activeTunnel = $tunnelResponse.tunnels | Where-Object { $_.proto -eq "tcp" -and $_.public_url -like "*ngrok*" }
+              $quickCheck = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -TimeoutSec 3 -ErrorAction Stop
+              $activeTunnel = $quickCheck.tunnels | Where-Object { $_.proto -eq "tcp" } | Select-Object -First 1
               
               if ($activeTunnel) {
-                Write-Host "✅ Tunnel OK: $($activeTunnel.public_url) -> localhost:3389"
+                Write-Host "✅ Tunnel verified OK"
               } else {
-                Write-Host "⚠️  No active TCP tunnel found, attempting restart..."
-                # Relancer ngrok si nécessaire
-                Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log stdout" -NoNewWindow
-                Start-Sleep -Seconds 15
+                Write-Host "⚠️ Tunnel check failed - but continuing..."
               }
             } catch {
-              Write-Host "⚠️  Tunnel check failed: $($_.Exception.Message)"
-              # Tentative de relance de ngrok
-              try {
-                Write-Host "Attempting to restart ngrok..."
-                Stop-Process -Name "ngrok" -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 5
-                Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log stdout" -NoNewWindow
-                Start-Sleep -Seconds 15
-              } catch {
-                Write-Host "Failed to restart ngrok: $($_.Exception.Message)"
-              }
+              Write-Host "⚠️ Quick tunnel check failed - but continuing..."
             }
           }
           
-          # Garder la session Windows active
-          try {
-            # Simuler une activité pour éviter que la session se mette en veille
-            [System.Windows.Forms.SendKeys]::SendWait(" ")
-          } catch {
-            # Si SendKeys n'est pas disponible, utiliser une autre méthode
-            Get-Process | Out-Null
-          }
-          
-          # Attendre 1 minute avant la prochaine vérification
+          # Attendre 1 minute
           Start-Sleep -Seconds 60
         }
 
