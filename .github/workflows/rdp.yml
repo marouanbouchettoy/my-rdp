@@ -76,13 +76,7 @@ jobs:
             Write-Host "=========================="
             
             # Sauvegarder les informations dans un fichier
-            $connectionInfo = @"
-=== RDP CONNECTION INFO ===
-Host: $($tunnel.public_url.Replace('tcp://', ''))
-Username: rdpuser
-Password: [PROTECTED - Check repository secrets]
-============================
-"@
+            $connectionInfo = "=== RDP CONNECTION INFO ===`nHost: $($tunnel.public_url.Replace('tcp://', ''))`nUsername: rdpuser`nPassword: [PROTECTED - Check repository secrets]`n============================"
             $connectionInfo | Out-File -FilePath "rdp_connection_info.txt"
           } else {
             Write-Host "No TCP tunnel found"
