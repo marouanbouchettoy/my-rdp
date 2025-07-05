@@ -1,52 +1,48 @@
-name: RDP Access via ngrok
+name: RDP avec ngrok
 
 on:
   workflow_dispatch:
-    inputs:
-      duration:
-        description: 'Duration in minutes (max 360)'
-        required: true
-        default: '60'
-        type: string
 
 jobs:
-  rdp-setup:
+  setup-rdp:
     runs-on: windows-latest
     
     steps:
-    - name: Enable RDP
+    - name: Activer RDP
       run: |
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
         
-    - name: Create RDP User
+    - name: Créer utilisateur RDP
       run: |
-        net user rdpuser "P@ssw0rd123!" /add
+        net user rdpuser "RDP123!" /add
         net localgroup administrators rdpuser /add
         
-    - name: Setup ngrok
+    - name: Télécharger et installer ngrok
       run: |
         Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
-        Expand-Archive -Path "ngrok.zip" -DestinationPath "C:\ngrok"
-        C:\ngrok\ngrok.exe authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+        Expand-Archive -Path "ngrok.zip" -DestinationPath "."
         
-    - name: Start ngrok tunnel
+    - name: Authentifier ngrok
       run: |
-        Start-Process -FilePath "C:\ngrok\ngrok.exe" -ArgumentList "tcp 3389" -WindowStyle Hidden
+        ./ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+        
+    - name: Démarrer tunnel RDP
+      run: |
+        Start-Process -FilePath "./ngrok.exe" -ArgumentList "tcp 3389" -NoNewWindow
         Start-Sleep -Seconds 10
         
-    - name: Get ngrok URL
+    - name: Obtenir URL ngrok
       run: |
         $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels"
         $rdpUrl = $response.tunnels[0].public_url
-        Write-Host "RDP URL: $rdpUrl"
-        Write-Host "Username: rdpuser"
-        Write-Host "Password: P@ssw0rd123!"
+        Write-Host "URL RDP: $rdpUrl"
+        Write-Host "Utilisateur: rdpuser"
+        Write-Host "Mot de passe: RDP123!"
         
-    - name: Keep session alive
+    - name: Maintenir la connexion
       run: |
-        $duration = [int]"${{ github.event.inputs.duration }}"
-        if ($duration -gt 360) { $duration = 360 }
-        Write-Host "Session will run for $duration minutes"
-        Start-Sleep -Seconds ($duration * 60)
+        while ($true) {
+          Start-Sleep -Seconds 60
+          Write-Host "Connexion active..."
+        }
